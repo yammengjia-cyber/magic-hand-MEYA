@@ -1,112 +1,139 @@
-import { useEffect, useState, useRef } from 'react';
+import { useRef, useEffect } from 'react';
+import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
-export function useHandGesture() {
-  const [gesture, setGesture] = useState('正在启动摄像头...');
-  
-  // rotateHandX: 左手 (控制旋转)
-  // actionGesture: 右手 (控制握拳)
-  const rotateHandX = useRef(0.5); 
-  const actionGesture = useRef('OPEN_HAND'); 
+export const useHandGesture = () => {
+  // 核心数据 Ref (用于输出)
+  const rotateHandX = useRef(0.5);       // 控制旋转 (0.0 - 1.0)
+  const actionGesture = useRef('NONE');  // 控制动作 ('CLOSED_FIST' / 'OPEN_PALM' / 'NONE')
 
+  // 内部状态 Ref (用于处理)
   const videoRef = useRef(null);
+  const handLandmarkerRef = useRef(null);
+  const animationFrameId = useRef(null);
 
   useEffect(() => {
-    const videoElement = document.createElement("video");
-    videoElement.style.display = "none";
-    document.body.appendChild(videoElement);
-    videoRef.current = videoElement;
-
-    // 使用外挂脚本
-    const Hands = window.Hands;
-    const Camera = window.Camera;
-
-    if (!Hands || !Camera) {
-      setGesture("等待 AI 加载...");
-      return;
-    }
-
-    const hands = new Hands({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-    });
-
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-
-    hands.onResults((results) => {
-      if (!results.multiHandLandmarks) return;
-
-      let leftHandDetected = false;
-      let rightHandDetected = false;
-
-      for (let i = 0; i < results.multiHandLandmarks.length; i++) {
-        const landmarks = results.multiHandLandmarks[i];
+    const initHandLandmarker = async () => {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+        );
         
-        if (results.multiHandedness && results.multiHandedness[i]) {
-            const label = results.multiHandedness[i].label; 
+        handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate: "GPU" // 尝试使用 GPU 加速
+          },
+          runningMode: "VIDEO",
+          numHands: 1,
+          minHandDetectionConfidence: 0.5,
+          minHandPresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
 
-            // ✋ 屏幕左边的手 -> 旋转
-            if (label === 'Left') {
-              rotateHandX.current = 1 - landmarks[0].x; 
-              leftHandDetected = true;
-            } 
-            
-            // 👊 屏幕右边的手 -> 动作
-            if (label === 'Right') {
-              detectRightHandPose(landmarks);
-              rightHandDetected = true;
-            }
+        startWebcam();
+      } catch (error) {
+        console.error("模型加载失败:", error);
+      }
+    };
+
+    const startWebcam = async () => {
+      try {
+        // 🌟 1. 手机端关键：强制使用前置摄像头 (facingMode: 'user')
+        const constraints = {
+          video: {
+            facingMode: "user", 
+            width: { ideal: 640 },  // 降低分辨率以提高手机流畅度
+            height: { ideal: 480 }
+          }
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        
+        // 创建视频元素
+        const video = document.createElement("video");
+        
+        // 🌟 2. iOS 关键：必须设置 playsInline，否则 iPhone 上无法运行
+        video.playsInline = true; 
+        video.muted = true;
+        video.srcObject = stream;
+
+        // 等待视频元数据加载完成
+        video.onloadedmetadata = () => {
+          video.play();
+          videoRef.current = video;
+          predict();
+        };
+
+      } catch (err) {
+        console.error("无法启动摄像头:", err);
+        // 如果前置摄像头失败，尝试不带参数启动（回退方案）
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const video = document.createElement("video");
+          video.playsInline = true;
+          video.muted = true;
+          video.srcObject = fallbackStream;
+          video.onloadedmetadata = () => {
+            video.play();
+            videoRef.current = video;
+            predict();
+          };
+        } catch (e) {
+          console.error("摄像头完全不可用");
         }
       }
+    };
 
-      if (leftHandDetected && rightHandDetected) {
-        setGesture("✅ 双手就绪：左手转动 | 右手握拳");
-      } else if (leftHandDetected) {
-        setGesture("✋ 左手已识别 (旋转)");
-      } else if (rightHandDetected) {
-        setGesture("👊 右手已识别 (动作)");
-      } else {
-        setGesture("👀 请举起双手...");
+    const predict = () => {
+      if (videoRef.current && handLandmarkerRef.current) {
+        let startTimeMs = performance.now();
+        const results = handLandmarkerRef.current.detectForVideo(videoRef.current, startTimeMs);
+
+        if (results.landmarks && results.landmarks.length > 0) {
+          const landmarks = results.landmarks[0];
+
+          // --- A. 计算手势位置 (X轴映射) ---
+          // 取食指根部(5)和粉指根部(17)的中心点
+          const x = (landmarks[5].x + landmarks[17].x) / 2;
+          
+          // 手机是镜像的，所以 1-x 让方向符合直觉
+          rotateHandX.current = 1 - x; 
+
+          // --- B. 简单的握拳检测算法 ---
+          // 检查指尖是否低于指关节 (Y轴向下为大)
+          // 拇指(4), 食指(8), 中指(12), 无名指(16), 小指(20)
+          // 简单的判断：如果三个以上的手指指尖位置 低于(数值大于) 它们对应的第二关节
+          
+          let closedFingers = 0;
+          // 检查 食指(8 vs 6), 中指(12 vs 10), 无名指(16 vs 14), 小指(20 vs 18)
+          if (landmarks[8].y > landmarks[6].y) closedFingers++;
+          if (landmarks[12].y > landmarks[10].y) closedFingers++;
+          if (landmarks[16].y > landmarks[14].y) closedFingers++;
+          if (landmarks[20].y > landmarks[18].y) closedFingers++;
+
+          if (closedFingers >= 3) {
+            actionGesture.current = 'CLOSED_FIST';
+          } else {
+            actionGesture.current = 'OPEN_PALM';
+          }
+
+        } else {
+          // 如果没检测到手，保持“无动作”
+          actionGesture.current = 'NONE';
+        }
       }
-    });
+      animationFrameId.current = requestAnimationFrame(predict);
+    };
 
-    const camera = new Camera(videoElement, {
-      onFrame: async () => {
-        if(videoRef.current) await hands.send({ image: videoRef.current });
-      },
-      width: 640,
-      height: 480
-    });
-    
-    camera.start().then(() => setGesture("摄像头已启动"));
+    initHandLandmarker();
 
     return () => {
-      hands.close();
-      if(videoElement) videoElement.remove();
+      if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      }
     };
   }, []);
 
-  const detectRightHandPose = (landmarks) => {
-    const wrist = landmarks[0];
-    const tips = [8, 12, 16, 20]; 
-    let foldedCount = 0;
-    const palmSize = Math.hypot(landmarks[0].x - landmarks[9].x, landmarks[0].y - landmarks[9].y);
-
-    tips.forEach(tipIdx => {
-      const tip = landmarks[tipIdx];
-      const distance = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
-      if (distance < palmSize * 1.1) foldedCount++;
-    });
-
-    if (foldedCount >= 3) {
-      actionGesture.current = 'CLOSED_FIST';
-    } else {
-      actionGesture.current = 'OPEN_HAND';
-    }
-  };
-
-  return { gesture, rotateHandX, actionGesture };
-}
+  return { rotateHandX, actionGesture };
+};
