@@ -1,0 +1,36 @@
+import React, { useMemo, useRef } from 'react';
+import { Html, useTexture } from '@react-three/drei'; // 🌟 1. 引入 useTexture
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+
+// ... (中间的 THEME, DATA, StarText, VolumetricBar, MixedColorSphere 等代码保持不变，不要动) ...
+// ... (直接滚动到文件最下方) ...
+
+// === 🖼️ 图片转粒子组件 (新增) ===
+export const ParticleImage = ({ url, scale = 1, position = [0, 0, 0] }) => {
+  // 加载纹理
+  const texture = useTexture(url);
+
+  return (
+    <points position={position}>
+      {/* planeGeometry 参数解释: 
+         [宽, 高, 宽的分段数, 高的分段数] 
+         分段数越高，粒子越密集，图像越清晰。这里设为 80x25 
+      */}
+      <planeGeometry args={[scale * 3.5, scale, 80, 25]} />
+      <pointsMaterial 
+        size={0.04}            // 粒子大小
+        map={texture}          // 贴图
+        transparent            // 允许透明
+        alphaTest={0.1}        // 过滤掉完全透明的像素
+        sizeAttenuation={true} // 随距离近大远小
+        depthWrite={false}
+        vertexColors={false}   // 使用贴图原色
+        color="#ffffff"
+      />
+    </points>
+  );
+};
+
+// === 🕸️ 连接线组件 (保持在最后) ===
+export const FineLinesNatural = ... (保持不变)
