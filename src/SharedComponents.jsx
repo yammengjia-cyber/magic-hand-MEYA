@@ -44,15 +44,14 @@ export const DATA = {
 export const isHero = (isFist, isActive) => isActive;
 
 // === 📝 通用文字组件 ===
-export const StarText = ({ children, color = "white", position = [0,0,0], size = 1, isFist, isActive, opacity = 1, width = 'auto', letterSpacing = null }) => {
-  const baseOpacity = opacity !== 1 ? opacity : (isFist && isActive ? 1 : (isActive ? 0.7 : 0.1));
-  const defaultSpacing = (isFist && isActive) ? '1px' : '3px';
-  const spacing = letterSpacing || defaultSpacing;
+export const StarText = ({ children, color = "white", position = [0,0,0], size = 1, isActive, opacity = 1, width = 'auto', letterSpacing = '1px' }) => {
+  // 简化逻辑：只要isActive，透明度就是1 (除非强制传了opacity)
+  const baseOpacity = opacity !== 1 ? opacity : (isActive ? 1.0 : 0.0);
 
   return (
     <group position={position}>
       <Html transform sprite center distanceFactor={10} style={{ pointerEvents: 'none', userSelect: 'none', zIndex: 100 }}>
-        <div style={{ fontFamily: "'Codystar', sans-serif", color: color, fontSize: `${size * 25}px`, textAlign: 'center', whiteSpace: 'pre-wrap', fontWeight: '900', opacity: baseOpacity, letterSpacing: spacing, filter: isActive ? 'none' : `blur(3px)`, transition: 'all 0.5s ease-out', width: width }}>
+        <div style={{ fontFamily: "'Codystar', sans-serif", color: color, fontSize: `${size * 25}px`, textAlign: 'center', whiteSpace: 'pre-wrap', fontWeight: '900', opacity: baseOpacity, letterSpacing: letterSpacing, filter: isActive ? 'none' : `blur(5px)`, transition: 'all 0.5s ease-out', width: width }}>
           {children}
         </div>
       </Html>
@@ -60,84 +59,78 @@ export const StarText = ({ children, color = "white", position = [0,0,0], size =
   );
 };
 
-// === 📊 粒子柱子组件 (修复版：文字显示更稳定) ===
-export const VolumetricBar = ({ width, height, depth, isFist, isActive, position, value, label, isPeak, index }) => {
-  const { positions, randoms } = useMemo(() => {
-    const count = 2000; 
+// === 📊 粒子柱子组件 (纯净版：自动报数) ===
+export const VolumetricBar = ({ width, height, depth, isActive, position, value, label, isPeak, index }) => {
+  // 1. 生成固定的粒子形状 (不长高，也不动)
+  const { positions } = useMemo(() => {
+    const count = 1500; // 粒子数量适中
     const pos = new Float32Array(count * 3); 
-    const rnd = new Float32Array(count * 3);
     for(let i=0; i<count; i++) {
       pos[i*3] = (Math.random() - 0.5) * width;
       pos[i*3+1] = (Math.random() - 0.5) * height; 
       pos[i*3+2] = (Math.random() - 0.5) * depth;
-      
-      rnd[i*3] = (Math.random() - 0.5) * 0.1;
-      rnd[i*3+1] = (Math.random() - 0.5) * 0.1;
-      rnd[i*3+2] = (Math.random() - 0.5) * 0.1;
     }
-    return { positions: pos, randoms: rnd };
+    return { positions: pos };
   }, [width, height, depth]);
 
   const pointsRef = useRef();
+  
+  // 2. 控制数字显示的开关
   const [showLabels, setShowLabels] = useState(false);
 
-  // 定时器逻辑保持不变，它负责监控 isFist 来开关 showLabels
+  // 3. 🌟 关键逻辑：自动逐一显示
   useEffect(() => {
     let timeout;
-    if (isFist && isActive) {
-      const delay = index * 15; 
+    if (isActive) {
+      // 只要翻到这一页，就开始倒计时
+      // index * 30ms：第1个立即显示，第2个等30ms，第3个等60ms...
+      // 这样会形成一个快速的“多米诺骨牌”效果，不需要握拳
+      const delay = index * 30; 
       timeout = setTimeout(() => {
         setShowLabels(true);
       }, delay);
     } else {
+      // 翻走时，重置状态
       setShowLabels(false);
     }
     return () => clearTimeout(timeout);
-  }, [isFist, isActive, index]);
+  }, [isActive, index]);
 
+  // 4. 粒子呼吸 (仅仅为了不让画面太死板，很微弱的呼吸)
   useFrame((state) => {
     if (!pointsRef.current) return;
-    const geom = pointsRef.current.geometry;
-    const posAttr = geom.attributes.position;
-    const array = posAttr.array;
-
-    for(let i=0; i<2000; i++) {
-      const tx = positions[i*3];
-      const ty = positions[i*3+1];
-      const tz = positions[i*3+2];
-
-      const time = state.clock.elapsedTime;
-      const hover = Math.sin(time + positions[i*3]) * 0.002; 
-
-      array[i*3] += (tx - array[i*3]) * 0.1;
-      array[i*3+1] += ((ty + hover) - array[i*3+1]) * 0.1;
-      array[i*3+2] += (tz - array[i*3+2]) * 0.1;
+    const array = pointsRef.current.geometry.attributes.position.array;
+    const time = state.clock.elapsedTime;
+    for(let i=0; i<1500; i++) {
+      // 依然保持原位，只是在Y轴微微浮动
+      array[i*3+1] = positions[i*3+1] + Math.sin(time + positions[i*3]) * 0.005;
     }
-    posAttr.needsUpdate = true;
+    pointsRef.current.geometry.attributes.position.needsUpdate = true;
   });
 
   return (
     <group position={position}>
+      {/* 柱子本体：isActive时亮度为0.8，否则变暗 */}
       <points ref={pointsRef}>
         <bufferGeometry><bufferAttribute attach="attributes-position" count={positions.length/3} array={new Float32Array(positions)} itemSize={3} /></bufferGeometry>
-        <pointsMaterial size={0.025} color={isPeak ? THEME.primary : THEME.secondary} transparent blending={THREE.AdditiveBlending} sizeAttenuation={true} depthWrite={false} opacity={isFist && isActive ? 1.0 : (isActive ? 0.6 : 0.1)} />
+        <pointsMaterial size={0.03} color={isPeak ? THEME.primary : THEME.secondary} transparent blending={THREE.AdditiveBlending} depthWrite={false} opacity={isActive ? 0.8 : 0.1} />
       </points>
 
-      {/* 🌟🌟🌟 核心修复在这里 🌟🌟🌟 */}
-      {/* 把原来的 (isFist && isActive && showLabels) 改成了下面这样 */}
-      {/* 只要是当前页面(isActive)，并且定时器开关(showLabels)开了，就显示 */}
+      {/* 数字和标签：完全由自动计时器控制 */}
       {(isActive && showLabels) && (
         <group position={[0, height/2 + 0.3, 0]}>
-           <StarText isFist={true} isActive={true} size={0.3} color="white">{value}</StarText>
-           <StarText isFist={true} isActive={true} position={[0, -height - 0.5, 0]} size={0.2} color="#888">{label}</StarText>
+           {/* 数值 */}
+           <StarText isActive={true} size={0.3} color="white" opacity={1}>{value}</StarText>
+           {/* 日期 */}
+           <StarText isActive={true} position={[0, -height - 0.5, 0]} size={0.2} color="#888" opacity={1}>{label}</StarText>
         </group>
       )}
     </group>
   );
 };
 
-// === 🌐 粒子球组件 (保持不变) ===
-export const MixedColorSphere = ({ radius, colorPrimary, colorSecondary, isFist, isActive, particleCount = 3000 }) => {
+// === 🌐 粒子球组件 (装饰用，保持不变) ===
+export const MixedColorSphere = ({ radius, colorPrimary, colorSecondary, isActive, particleCount = 2000 }) => {
   const { positions, colors } = useMemo(() => {
     const count = particleCount; 
     const pos = new Float32Array(count * 3); const cols = new Float32Array(count * 3); const c1 = new THREE.Color(colorPrimary); const c2 = new THREE.Color(colorSecondary);
@@ -148,13 +141,13 @@ export const MixedColorSphere = ({ radius, colorPrimary, colorSecondary, isFist,
   return (
     <points>
       <bufferGeometry><bufferAttribute attach="attributes-position" count={positions.length/3} array={positions} itemSize={3} /><bufferAttribute attach="attributes-color" count={colors.length/3} array={colors} itemSize={3} /></bufferGeometry>
-      <pointsMaterial size={0.02} vertexColors transparent blending={THREE.AdditiveBlending} depthWrite={false} opacity={isFist && isActive ? 1.0 : (isActive ? 0.6 : 0.1)} />
+      <pointsMaterial size={0.02} vertexColors transparent blending={THREE.AdditiveBlending} depthWrite={false} opacity={isActive ? 0.8 : 0.1} />
     </points>
   )
 }
 
-// === 🖼️ 图片转粒子组件 (保持不变) ===
-export const ParticleImage = ({ url, scale = 1, position = [0, 0, 0], density = 150, brightness = 0.8 }) => {
+// === 🖼️ 图片转粒子组件 (保持之前的发光逻辑，但去掉复杂的pop) ===
+export const ParticleImage = ({ url, scale = 1, position = [0, 0, 0], density = 150, brightness = 0.8, isFist = false }) => {
   const texture = useTexture(url);
   const widthSegments = density;
   const heightSegments = Math.floor(density * (1/3.5)); 
@@ -163,29 +156,14 @@ export const ParticleImage = ({ url, scale = 1, position = [0, 0, 0], density = 
     uniforms: {
       uTexture: { value: texture },
       uBrightness: { value: brightness },
+      uPopStrength: { value: 0.0 }, 
     },
     vertexShader: `
       varying vec2 vUv;
-      float random(vec2 st) {
-          return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
-      }
-
+      float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
       void main() {
         vUv = uv;
         vec3 pos = position;
-        vec2 d = abs(vUv - 0.5);
-        float rectDist = max(d.x, d.y);
-        float inEdgeZone = step(0.35, rectDist);
-        float luckyNumber = random(vUv + 1.0);
-        float canFly = inEdgeZone * step(0.80, luckyNumber);
-        float baseJitter = 0.01;
-        float flightDist = 0.4; 
-        float totalOffset = baseJitter + (canFly * flightDist);
-
-        pos.x += (random(vUv) - 0.5) * totalOffset;
-        pos.y += (random(vUv + 1.2) - 0.5) * totalOffset;
-        pos.z += (random(vUv + 2.4) - 0.5) * totalOffset * 2.0; 
-
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
         float sizeRandomizer = 1.0 + random(vUv * 3.0) * 4.0;
@@ -195,27 +173,26 @@ export const ParticleImage = ({ url, scale = 1, position = [0, 0, 0], density = 
     fragmentShader: `
       uniform sampler2D uTexture;
       uniform float uBrightness;
+      uniform float uPopStrength;
       varying vec2 vUv;
       void main() {
         vec4 texColor = texture2D(uTexture, vUv);
-        vec2 d = abs(vUv - 0.5);
-        float rectDist = max(d.x, d.y);
-        float mask = 1.0 - smoothstep(0.45, 0.5, rectDist);
-        float lightGradient = 1.0 - (rectDist * 0.4);
-        float finalBrightness = uBrightness * 1.1 * lightGradient;
+        // 简单亮度控制
+        float finalBrightness = uBrightness * (1.0 + uPopStrength); 
         gl_FragColor = texColor;
         gl_FragColor.rgb *= finalBrightness; 
-        gl_FragColor.a *= mask * finalBrightness;
+        gl_FragColor.a *= finalBrightness;
         if (gl_FragColor.a < 0.1) discard;
       }
     `,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.NormalBlending 
+    transparent: true, depthWrite: false, blending: THREE.NormalBlending 
   }), [texture]);
 
-  useFrame(() => {
+  useFrame((state, delta) => {
     if (material.uniforms) {
+      // 这里的 pop 依然保留一点点，以防万一你之后还要用
+      const targetPop = isFist ? 0.8 : 0.0;
+      material.uniforms.uPopStrength.value = THREE.MathUtils.lerp(material.uniforms.uPopStrength.value, targetPop, delta * 5);
       material.uniforms.uBrightness.value = brightness;
     }
   });
@@ -228,7 +205,7 @@ export const ParticleImage = ({ url, scale = 1, position = [0, 0, 0], density = 
 };
 
 // === 🕸️ 连接线组件 (保持不变) ===
-export const FineLinesNatural = ({ positions, color, isFist, isActive }) => {
+export const FineLinesNatural = ({ positions, color, isActive }) => {
   const linesGeometry = useMemo(() => {
     const points = [];
     const connections = [ [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [1, 3], [3, 5], [5, 0], [2, 4], [4, 6], [6, 0] ];
@@ -237,7 +214,7 @@ export const FineLinesNatural = ({ positions, color, isFist, isActive }) => {
   }, [positions]);
   return (
     <lineSegments geometry={linesGeometry}>
-      <lineBasicMaterial color="#ffffff" transparent blending={THREE.AdditiveBlending} linewidth={1} opacity={isFist && isActive ? 0.5 : (isActive ? 0.2 : 0.05)} />
+      <lineBasicMaterial color="#ffffff" transparent blending={THREE.AdditiveBlending} linewidth={1} opacity={isActive ? 0.2 : 0.05} />
     </lineSegments>
   )
 }
