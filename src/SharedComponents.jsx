@@ -60,20 +60,17 @@ export const StarText = ({ children, color = "white", position = [0,0,0], size =
   );
 };
 
-// === 📊 粒子柱子组件 (回归版：形状静止 + 数字逐一弹出) ===
+// === 📊 粒子柱子组件 (修复版：文字显示更稳定) ===
 export const VolumetricBar = ({ width, height, depth, isFist, isActive, position, value, label, isPeak, index }) => {
-  // 1. 生成完整的长方体粒子
   const { positions, randoms } = useMemo(() => {
     const count = 2000; 
     const pos = new Float32Array(count * 3); 
     const rnd = new Float32Array(count * 3);
     for(let i=0; i<count; i++) {
-      // 粒子均匀分布在完整的长宽高内
       pos[i*3] = (Math.random() - 0.5) * width;
       pos[i*3+1] = (Math.random() - 0.5) * height; 
       pos[i*3+2] = (Math.random() - 0.5) * depth;
       
-      // 随机微动参数
       rnd[i*3] = (Math.random() - 0.5) * 0.1;
       rnd[i*3+1] = (Math.random() - 0.5) * 0.1;
       rnd[i*3+2] = (Math.random() - 0.5) * 0.1;
@@ -82,46 +79,36 @@ export const VolumetricBar = ({ width, height, depth, isFist, isActive, position
   }, [width, height, depth]);
 
   const pointsRef = useRef();
-
-  // 🌟 2. 仅控制文字的显示状态
   const [showLabels, setShowLabels] = useState(false);
 
-  // 🌟 3. 顺序延迟逻辑
+  // 定时器逻辑保持不变，它负责监控 isFist 来开关 showLabels
   useEffect(() => {
     let timeout;
     if (isFist && isActive) {
-      // 握拳时：根据 index 延迟显示文字
-      // index * 80ms (每个数字间隔60毫秒弹出)
-      const delay = index * 60; 
+      const delay = index * 15; 
       timeout = setTimeout(() => {
         setShowLabels(true);
       }, delay);
     } else {
-      // 松手时：立即隐藏文字
       setShowLabels(false);
     }
     return () => clearTimeout(timeout);
   }, [isFist, isActive, index]);
 
-  // 4. 粒子微动动画 (仅呼吸感，不改变形状)
   useFrame((state) => {
     if (!pointsRef.current) return;
     const geom = pointsRef.current.geometry;
     const posAttr = geom.attributes.position;
     const array = posAttr.array;
 
-    // 让粒子在原地轻微漂浮，保持画面鲜活
     for(let i=0; i<2000; i++) {
-      // 恢复到原始位置 + 随机扰动
       const tx = positions[i*3];
       const ty = positions[i*3+1];
       const tz = positions[i*3+2];
 
       const time = state.clock.elapsedTime;
-      // 极小的波动
       const hover = Math.sin(time + positions[i*3]) * 0.002; 
 
-      // 简单平滑移动回到设定位置 (防止之前动画的残留)
       array[i*3] += (tx - array[i*3]) * 0.1;
       array[i*3+1] += ((ty + hover) - array[i*3+1]) * 0.1;
       array[i*3+2] += (tz - array[i*3+2]) * 0.1;
@@ -130,20 +117,18 @@ export const VolumetricBar = ({ width, height, depth, isFist, isActive, position
   });
 
   return (
-    // 🌟 位置固定，形状固定
     <group position={position}>
       <points ref={pointsRef}>
         <bufferGeometry><bufferAttribute attach="attributes-position" count={positions.length/3} array={new Float32Array(positions)} itemSize={3} /></bufferGeometry>
-        {/* 激活时完全不透明(1.0)，未激活时半透明(0.1) */}
         <pointsMaterial size={0.025} color={isPeak ? THEME.primary : THEME.secondary} transparent blending={THREE.AdditiveBlending} sizeAttenuation={true} depthWrite={false} opacity={isFist && isActive ? 1.0 : (isActive ? 0.6 : 0.1)} />
       </points>
 
-      {/* 🌟 文字标签：根据 showLabels 决定是否渲染 */}
-      {(isFist && isActive && showLabels) && (
+      {/* 🌟🌟🌟 核心修复在这里 🌟🌟🌟 */}
+      {/* 把原来的 (isFist && isActive && showLabels) 改成了下面这样 */}
+      {/* 只要是当前页面(isActive)，并且定时器开关(showLabels)开了，就显示 */}
+      {(isActive && showLabels) && (
         <group position={[0, height/2 + 0.3, 0]}>
-           {/* 数字 */}
            <StarText isFist={true} isActive={true} size={0.3} color="white">{value}</StarText>
-           {/* 日期 (在柱子底部下方) */}
            <StarText isFist={true} isActive={true} position={[0, -height - 0.5, 0]} size={0.2} color="#888">{label}</StarText>
         </group>
       )}
@@ -168,7 +153,7 @@ export const MixedColorSphere = ({ radius, colorPrimary, colorSecondary, isFist,
   )
 }
 
-// === 🖼️ 图片转粒子组件 (保持你满意的版本) ===
+// === 🖼️ 图片转粒子组件 (保持不变) ===
 export const ParticleImage = ({ url, scale = 1, position = [0, 0, 0], density = 150, brightness = 0.8 }) => {
   const texture = useTexture(url);
   const widthSegments = density;
@@ -242,7 +227,7 @@ export const ParticleImage = ({ url, scale = 1, position = [0, 0, 0], density = 
   );
 };
 
-// === 🕸️ 连接线组件 ===
+// === 🕸️ 连接线组件 (保持不变) ===
 export const FineLinesNatural = ({ positions, color, isFist, isActive }) => {
   const linesGeometry = useMemo(() => {
     const points = [];
